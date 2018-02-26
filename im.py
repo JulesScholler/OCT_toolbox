@@ -51,45 +51,61 @@ def process_4_phases_OCT(data):
         dataPhase[i,:,:]=np.angle((data[4*i+3]-data[4*i+1])/(data[4*i+4]-data[4*i+2]))
     return dataAmp,dataPhase
 
-def DFFOCT(data,method='fft'):
+def DFFOCT(data, method='fft', fs=2, n_mean=10):
     imD=np.zeros((data.shape[1],data.shape[2],3))
     if method=='welch':
-        # Compute welch periodogram
-        t=1
-        for i in range(data.shape[1]):
-            for j in range(data.shape[2]):
-                f, a = welch(data[:,i,j], fs=2, window='flattop', scaling='density')
-                imD[i,j,0]=np.sum(a[1:int(a.shape[0]/3)]**2)
-                imD[i,j,1]=np.sum(a[int(a.shape[0]/3)+1:2*int(a.shape[0]/3)]**2)
-                imD[i,j,2]=np.sum(a[2*int(a.shape[0]/3)+1:3*int(a.shape[0]/3)]**2)
-                if i*j/(data.shape[1]*data.shape[2])>t/100:
-                    print(t,'%')
-                    t=t+1
-        imD=np.log10(imD)
-        imD=imD-np.min(imD)
-        imD=imD/np.max(imD)*255
-        imD=imD.astype('uint8')
+    	# We divide the input in 4 pieces in order to avoid memory troubles
+    	f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+    	dx = int(data.shape[1]/2)
+    	dy = int(data.shape[2]/2)
+    	data_freq = np.zeros(f.size, data.shape[1], data.shape[2])
+    	f, data_freq[0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density')
+    	f, data_freq[0:dx, dy:-1] = welch(data[0:dx, dy:-1], fs=2, window='flattop', scaling='density')
+    	f, data_freq[dx:-1, 0:dy] = welch(data[dx:-1, 0:dy], fs=2, window='flattop', scaling='density')
+    	f, data_freq[dx:-1, dy:-1] = welch(data[dx:-1, dy:-1], fs=2, window='flattop', scaling='density')
+
+    	# Compute Intensity (V component) with substacks STD
+    	n_substack = data.shape[0]-n_mean
+		a = np.zeros(n_substack,data.shape[1],data.shape[2])
+		for i in range(n_substack):
+		    a[i] = np.std(data[i:i+n_mean], axis=0)
+		V = np.mean(a, axis=0)
+		del(a)
+
+		# Compute Color (H component) with frequency median
+		data_freq = normalize(data_freq.reshape((f.size,data.shape[1]*data.shape[2])), axis=0, norm='l1').reshape((f.size,data.shape[1],data.shape[2]))
+		cs = np.cumsum(data_freq, axis=0)
+		H = np.zeros((data.shape[1],data.shape[2]))
+		for i in range(cs.shape[1]):
+		    for j in range(cs.shape[2]):
+		        H[i,j] = np.min(np.where(cs[:,i,j]>=0.5))
+
+		# Compute Saturation (H component) with frequency median
+		S = np.zeros((data.shape[1],data.shape[2]))
+		for i in range(cs.shape[1]):
+		    for j in range(cs.shape[2]):
+		        S[i,j] = np.sqrt(np.sum(data_freq[:,i,j]*f**2)-np.mean(data_freq[:,i,j])**2)
+
+		V = rescale_intensity(V,out_range='float')
+		H = rescale_intensity(H,out_range='float')
+		S = rescale_intensity(S,out_range='float')
+
     elif method=='fft':
-        # Compute fft
-        t=1
-        for i in range(data.shape[1]):
-            for j in range(data.shape[2]):
-                a=np.abs(np.fft.fft(data[:,i,j]))
-                imD[i,j,0]=np.sum(a[1:int(a.shape[0]/3)]**2)
-                imD[i,j,1]=np.sum(a[int(a.shape[0]/3)+1:2*int(a.shape[0]/3)]**2)
-                imD[i,j,2]=np.sum(a[2*int(a.shape[0]/3)+1:3*int(a.shape[0]/3)]**2)
-                if i*j/(data.shape[1]*data.shape[2])>t/100:
-                    print(t,'%')
-                    t=t+1
-        imD=np.log10(imD)
-        imD=imD-np.min(imD)
-        imD=imD/np.max(imD)*255
-        imD=imD.astype('uint8')
+    	# We divide the input in 4 pieces in order to avoid memory troubles
+    	f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+    	dx = int(data.shape[1]/2)
+    	dy = int(data.shape[2]/2)
+    	data_freq = np.zeros(data.shape)
+    	f, data_freq[0:dx, 0:dy] = np.fft.fft(data[:, 0:dx, 0:dy], axis=0)
+    	f, data_freq[0:dx, dy:-1] = np.fft.fft(data[0:dx, dy:-1], axis=0)
+    	f, data_freq[dx:-1, 0:dy] = np.fft.fft(data[dx:-1, 0:dy], axis=0)
+    	f, data_freq[dx:-1, dy:-1] = np.fft.fft(data[dx:-1, dy:-1], axis=0)
+
     elif method=='metabolic':
         print('not supported yet')
     else:
         print('Unknown method')
-    return imD
+    return np.dstack((H,S,V))
 
 def radial_profil(image, center=None):
     """
