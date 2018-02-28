@@ -8,6 +8,9 @@ Created on Mon Oct  9 16:56:51 2017
 import numpy as np
 from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
+from skimage.exposure import rescale_intensity, equalize_adapthist, histogram
+from skimage.color import hsv2rgb
+from sklearn import preprocessing
 
 def normalize(data):
     """ The camera sensor drift and we correct it by normalizing each image by the total energy. """
@@ -51,61 +54,117 @@ def process_4_phases_OCT(data):
         dataPhase[i,:,:]=np.angle((data[4*i+3]-data[4*i+1])/(data[4*i+4]-data[4*i+2]))
     return dataAmp,dataPhase
 
-def DFFOCT(data, method='fft', fs=2, n_mean=10):
-    imD=np.zeros((data.shape[1],data.shape[2],3))
+def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
+    """
+    Compute D-FF-OCT image in the HSV space with:
+        - V: metabolic index (std with sliding window)
+        - S: median frequency
+        - H: frequency bandwidth
+    
+    """
     if method=='welch':
-    	# We divide the input in 4 pieces in order to avoid memory troubles
-    	f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
-    	dx = int(data.shape[1]/2)
-    	dy = int(data.shape[2]/2)
-    	data_freq = np.zeros(f.size, data.shape[1], data.shape[2])
-    	f, data_freq[0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density')
-    	f, data_freq[0:dx, dy:-1] = welch(data[0:dx, dy:-1], fs=2, window='flattop', scaling='density')
-    	f, data_freq[dx:-1, 0:dy] = welch(data[dx:-1, 0:dy], fs=2, window='flattop', scaling='density')
-    	f, data_freq[dx:-1, dy:-1] = welch(data[dx:-1, dy:-1], fs=2, window='flattop', scaling='density')
-
-    	# Compute Intensity (V component) with substacks STD
-    	n_substack = data.shape[0]-n_mean
-		a = np.zeros(n_substack,data.shape[1],data.shape[2])
-		for i in range(n_substack):
-		    a[i] = np.std(data[i:i+n_mean], axis=0)
-		V = np.mean(a, axis=0)
-		del(a)
-
-		# Compute Color (H component) with frequency median
-		data_freq = normalize(data_freq.reshape((f.size,data.shape[1]*data.shape[2])), axis=0, norm='l1').reshape((f.size,data.shape[1],data.shape[2]))
-		cs = np.cumsum(data_freq, axis=0)
-		H = np.zeros((data.shape[1],data.shape[2]))
-		for i in range(cs.shape[1]):
-		    for j in range(cs.shape[2]):
-		        H[i,j] = np.min(np.where(cs[:,i,j]>=0.5))
-
-		# Compute Saturation (H component) with frequency median
-		S = np.zeros((data.shape[1],data.shape[2]))
-		for i in range(cs.shape[1]):
-		    for j in range(cs.shape[2]):
-		        S[i,j] = np.sqrt(np.sum(data_freq[:,i,j]*f**2)-np.mean(data_freq[:,i,j])**2)
-
-		V = rescale_intensity(V,out_range='float')
-		H = rescale_intensity(H,out_range='float')
-		S = rescale_intensity(S,out_range='float')
+        # We divide the input in 4 pieces in order to avoid memory troubles
+        f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+        dx = int(data.shape[1]/2)
+        dy = int(data.shape[2]/2)
+        data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
+        f, data_freq[:, 0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, 0:dx, dy:data.shape[2]] = welch(data[:, 0:dx, dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, dx:data.shape[1], 0:dy] = welch(data[:, dx:data.shape[1], 0:dy], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
 
     elif method=='fft':
-    	# We divide the input in 4 pieces in order to avoid memory troubles
-    	f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
-    	dx = int(data.shape[1]/2)
-    	dy = int(data.shape[2]/2)
-    	data_freq = np.zeros(data.shape)
-    	f, data_freq[0:dx, 0:dy] = np.fft.fft(data[:, 0:dx, 0:dy], axis=0)
-    	f, data_freq[0:dx, dy:-1] = np.fft.fft(data[0:dx, dy:-1], axis=0)
-    	f, data_freq[dx:-1, 0:dy] = np.fft.fft(data[dx:-1, 0:dy], axis=0)
-    	f, data_freq[dx:-1, dy:-1] = np.fft.fft(data[dx:-1, dy:-1], axis=0)
-
-    elif method=='metabolic':
-        print('not supported yet')
+        # We divide the input in 4 pieces in order to avoid memory troubles
+        dx = int(data.shape[1]/2)
+        dy = int(data.shape[2]/2)
+        s = data.shape
+        data_freq = np.zeros(s)
+        data = preprocessing.scale(np.reshape(data,(s[0],s[1]*s[2])), axis=0, with_std=False).reshape(s)
+        data_freq[:, 0:dx, 0:dy] = np.abs(np.fft.fft(data[:, 0:dx, 0:dy], axis=0))
+        data_freq[:, 0:dx, dy:data.shape[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:data.shape[2]], axis=0))
+        data_freq[:, dx:data.shape[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:data.shape[1], 0:dy], axis=0))
+        data_freq[:, dx:data.shape[1], dy:data.shape[2]] = np.abs(np.fft.fft(data[:, dx:data.shape[1], dy:data.shape[2]], axis=0))
+        data_freq = data_freq[0:np.floor(s[0]/2).astype('int')]
+        f = np.linspace(0, fs/2, data_freq.shape[0])
+        
     else:
         print('Unknown method')
-    return np.dstack((H,S,V))
+        
+    # Compute Intensity (V component) with substacks STD
+    n_substack = data.shape[0]-n_mean
+    a = np.zeros((n_substack,data.shape[1],data.shape[2]))
+    for i in range(n_substack):
+        a[i] = np.std(data[i:i+n_mean], axis=0)
+    V = np.mean(a, axis=0)
+    del(a)
+
+    # Compute Color (H component) with frequency median
+    s = data_freq.shape
+    data_freq = preprocessing.normalize(data_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
+    cs = np.cumsum(data_freq, axis=0)
+    H = np.zeros((data.shape[1],data.shape[2]))
+    for i in range(cs.shape[1]):
+        for j in range(cs.shape[2]):
+            H[i,j] = np.min(np.where(cs[:,i,j]>=0.5))
+
+    # Compute Saturation (S component) with frequency bandwidth
+    S = np.zeros((data.shape[1],data.shape[2]))
+    for i in range(cs.shape[1]):
+        for j in range(cs.shape[2]):
+            S[i,j] = np.sqrt(np.sum(data_freq[:,i,j]*f**2)-np.mean(data_freq[:,i,j])**2)
+
+    V = rescale_intensity(V,out_range='float')
+    H = rescale_intensity(H,out_range='float')
+    S = rescale_intensity(S,out_range='float')
+    return hsv2rgb(np.dstack((H,S,V)))
+
+def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5):
+    """
+    Compute D-FF-OCT image in the RGB space with:
+        - R: high frequencies
+        - G: medium frequencies
+        - B: low frequencies
+    
+    """
+    if method=='welch':
+        # We divide the input in 4 pieces in order to avoid memory troubles
+        f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+        dx = int(data.shape[1]/2)
+        dy = int(data.shape[2]/2)
+        data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
+        f, data_freq[:, 0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, 0:dx, dy:data.shape[2]] = welch(data[:, 0:dx, dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, dx:data.shape[1], 0:dy] = welch(data[:, dx:data.shape[1], 0:dy], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
+
+    elif method=='fft':
+        # We divide the input in 4 pieces in order to avoid memory troubles
+        dx = int(data.shape[1]/2)
+        dy = int(data.shape[2]/2)
+        s = data.shape
+        data_freq = np.zeros(s)
+        data = preprocessing.scale(np.reshape(data,(s[0],s[1]*s[2])), axis=0, with_std=False).reshape(s)
+        data_freq[:, 0:dx, 0:dy] = np.abs(np.fft.fft(data[:, 0:dx, 0:dy], axis=0))
+        data_freq[:, 0:dx, dy:data.shape[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:data.shape[2]], axis=0))
+        data_freq[:, dx:data.shape[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:data.shape[1], 0:dy], axis=0))
+        data_freq[:, dx:data.shape[1], dy:data.shape[2]] = np.abs(np.fft.fft(data[:, dx:data.shape[1], dy:data.shape[2]], axis=0))
+        data_freq = data_freq[0:np.floor(s[0]/2).astype('int')]
+        f = np.linspace(0, fs/2, data_freq.shape[0])
+        
+    else:
+        print('Unknown method')
+    
+    fs1 = int(np.round(2*f1/fs*data_freq.shape[0]))
+    fs2 = int(np.round(2*f2/fs*data_freq.shape[0]))
+    R = np.log(np.sum(data_freq[fs2:,:,:], axis=0))
+    G = np.log(np.sum(data_freq[fs1:fs2,:,:], axis=0))
+    B = np.log(np.sum(data_freq[0:fs1,:,:], axis=0))
+
+    R = rescale_intensity(R,out_range='float')
+    G = rescale_intensity(G,out_range='float')
+    B = rescale_intensity(B,out_range='float')
+    
+    return np.dstack((R,G,B))
 
 def radial_profil(image, center=None):
     """
@@ -179,8 +238,8 @@ def online_std(data,M1,mean1,n):
     M2 = M1 + delta*delta2
     return mean2,M2
 
-def save_as_tiff(data):
+def save_as_tiff(data, filename):
     savefile=(data/np.max(data)*(2**16-1)).astype('uint16')
-    with TiffWriter('zStack_denoised.tif', imagej=True) as tif:
+    with TiffWriter(filename+'.tif', imagej=True) as tif:
         for i in range(savefile.shape[0]):
             tif.save(savefile[i], compress=0)
