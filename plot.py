@@ -10,6 +10,8 @@ from skimage.util.dtype import dtype_range
 from skimage import exposure
 import numpy as np
 import cv2
+from matplotlib.gridspec import GridSpec
+from scipy.signal import welch
 
 def img_and_hist(image, bins=256):
 
@@ -35,21 +37,37 @@ def img_and_hist(image, bins=256):
     ax_cdf.plot(bins, img_cdf, 'r')
     
 def plot_time_series(imSTDtot,imNorm):
-    ax1 = plt.subplot(1, 2, 1)
-    ax1.set_axis_off()
-    ax2 = plt.subplot(1, 2, 2)
+    
+    plt.figure()
+    gs = GridSpec(2,2)
+    
+    axDFFOCT = plt.subplot(gs[:,0])
+    axDFFOCT.set_title('Dynamic image')
+    axDFFOCT.set_axis_off()
+    
+    axTime = plt.subplot(gs[0,1])
+    axTime.set_title('Time series')
+    axTime.set_xlabel('Time sample [#]')
+    axTime.set_ylabel('Intensity [a.u.]')
+    
+    axPSD = plt.subplot(gs[1,1])
+    axPSD.set_title('Power spectrum density')
+    axPSD.set_xlabel('Frequency [Hz]')
+    axPSD.set_ylabel('PSD [$V^2/Hz$]')
+    
     plt.ion()
-    plt.xlabel('Time samples [#]')
-    plt.ylabel('Intensity')
+
     while 1:
-        ax1.imshow(np.log10(imSTDtot),vmax=np.max(np.log10(imSTDtot))-1.5*np.std(np.log10(imSTDtot)))
+        axDFFOCT.imshow(imSTDtot)
         print('Click on the position to plot the time serie\n')
         x=plt.ginput(1)
         x=np.array(x)
         x=x.astype(int)
         
         # Compute STD for different film length
-        ax2.plot(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]))
+        axTime.plot(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]))
+        f,p = welch(imNorm[:,x[0,1],x[0,0]], nperseg=512)
+        axPSD.plot(f,p)
         plt.pause(0.05)
 
 def multi_slice_viewer(volume,sat):

@@ -118,7 +118,7 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
     S = rescale_intensity(S,out_range='float')
     return hsv2rgb(np.dstack((H,S,V)))
 
-def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5):
+def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
     """
     Compute D-FF-OCT image in the RGB space with:
         - R: high frequencies
@@ -156,6 +156,7 @@ def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5):
     
     fs1 = int(np.round(2*f1/fs*data_freq.shape[0]))
     fs2 = int(np.round(2*f2/fs*data_freq.shape[0]))
+    fs3 = int(np.round(2*f3/fs*data_freq.shape[0]))
     R = np.log(np.sum(data_freq[fs2:,:,:], axis=0))
     G = np.log(np.sum(data_freq[fs1:fs2,:,:], axis=0))
     B = np.log(np.sum(data_freq[0:fs1,:,:], axis=0))
