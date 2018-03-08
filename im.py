@@ -11,18 +11,18 @@ from skimage.external.tifffile import TiffWriter
 from skimage.exposure import rescale_intensity, equalize_adapthist, histogram
 from skimage.color import hsv2rgb
 from sklearn import preprocessing
+from PIL import Image
+from PIL import ImageFont
+from PIL import ImageDraw 
 
 def normalize(data):
     """ The camera sensor drift and we correct it by normalizing each image by the total energy. """
-    imNorm=np.zeros(data.shape)
+    directMean = np.mean(data, axis=(1,2))
+    directMax = np.max(2**16/directMean)
+    c = (2**16-1)/directMax
+    imNorm=np.zeros(data.shape).astype('uint16')
     for i in range(data.shape[0]):
-        imNorm[i]=data[i]/np.mean(data[i])
-    del(data)
-    # Rescale between 0 and 2**16
-    imNorm=imNorm-np.min(imNorm)
-    imNorm=imNorm/np.max(imNorm)
-    imNorm=imNorm*2**16
-    imNorm=imNorm.astype('uint16')
+        imNorm[i]=(data[i]/directMean[i]*c).astype('uint16')
     return imNorm
 
 def average(data,n=10):
@@ -244,3 +244,10 @@ def save_as_tiff(data, filename):
     with TiffWriter(filename+'.tif', imagej=True) as tif:
         for i in range(savefile.shape[0]):
             tif.save(savefile[i], compress=0)
+            
+def write_text(imPath, text, position=(0,0), color=(255,255,255), size=100):
+    a = Image.open(imPath)
+    draw = ImageDraw.Draw(a)
+    font = ImageFont.truetype("arial.ttf",100)
+    draw.text(position, text, color, font=font)
+    a.save(imPath[0:-4] + '_text.tif')
