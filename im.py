@@ -156,16 +156,17 @@ def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
     else:
         print('Unknown method')
     
-    fs1 = int(np.round(2*f1/fs*data_freq.shape[0]))
-    fs2 = int(np.round(2*f2/fs*data_freq.shape[0]))
-    fs3 = int(np.round(2*f3/fs*data_freq.shape[0]))
-    R = np.log(np.sum(data_freq[fs2:,:,:], axis=0))
-    G = np.log(np.sum(data_freq[fs1:fs2,:,:], axis=0))
-    B = np.log(np.sum(data_freq[0:fs1,:,:], axis=0))
-
-    R = rescale_intensity(R,out_range='float')
-    G = rescale_intensity(G,out_range='float')
-    B = rescale_intensity(B,out_range='float')
+    B = data_freq[1,:,:]
+    v_min, v_max = np.percentile(B, (1, 99))
+    B = rescale_intensity(B, in_range=(v_min, v_max), out_range='uint8')
+    
+    G = np.mean(data_freq[2:17,:,:], axis=0)
+    v_min, v_max = np.percentile(G, (1, 99))
+    G = rescale_intensity(G, in_range=(v_min, v_max), out_range='uint8')
+    
+    R = np.mean(data_freq[18:np.min((80,data_freq.shape[0]-1)),:,:], axis=0)
+    v_min, v_max = np.percentile(B, (1, 99))
+    R = rescale_intensity(R, in_range=(v_min, v_max), out_range='uint8')
     
     return np.dstack((R,G,B))
 
