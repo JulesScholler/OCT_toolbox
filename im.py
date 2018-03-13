@@ -8,13 +8,14 @@ Created on Mon Oct  9 16:56:51 2017
 import numpy as np
 from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
-from skimage.exposure import rescale_intensity, equalize_adapthist, histogram
+from skimage.exposure import rescale_intensity
 from skimage.color import hsv2rgb
 from sklearn import preprocessing
 from PIL import Image
 from PIL import ImageFont
 from PIL import ImageDraw 
 import matplotlib.pyplot as plt
+import cv2
 
 
 def normalize(data):
@@ -120,12 +121,13 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
     S = rescale_intensity(S,out_range='float')
     return hsv2rgb(np.dstack((H,S,V)))
 
-def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
+def DFFOCT_RGB(data, method='fft', fs=2, nMean=4):
     """
     Compute D-FF-OCT image in the RGB space with:
         - R: high frequencies
         - G: medium frequencies
         - B: low frequencies
+    Time dimension must be on axis 0.
     
     """
     if method=='welch':
@@ -137,9 +139,10 @@ def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
         f, data_freq[:, 0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density', axis=0)
         f, data_freq[:, 0:dx, dy:data.shape[2]] = welch(data[:, 0:dx, dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
         f, data_freq[:, dx:data.shape[1], 0:dy] = welch(data[:, dx:data.shape[1], 0:dy], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
+        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=fs, window='flattop', scaling='density', axis=0)
 
     elif method=='fft':
+        data = average(data, n=nMean)
         # We divide the input in 4 pieces in order to avoid memory troubles
         dx = int(data.shape[1]/2)
         dy = int(data.shape[2]/2)
@@ -147,9 +150,9 @@ def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
         data_freq = np.zeros(s)
         data = preprocessing.scale(np.reshape(data,(s[0],s[1]*s[2])), axis=0, with_std=False).reshape(s)
         data_freq[:, 0:dx, 0:dy] = np.abs(np.fft.fft(data[:, 0:dx, 0:dy], axis=0))
-        data_freq[:, 0:dx, dy:data.shape[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:data.shape[2]], axis=0))
-        data_freq[:, dx:data.shape[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:data.shape[1], 0:dy], axis=0))
-        data_freq[:, dx:data.shape[1], dy:data.shape[2]] = np.abs(np.fft.fft(data[:, dx:data.shape[1], dy:data.shape[2]], axis=0))
+        data_freq[:, 0:dx, dy:s[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:s[2]], axis=0))
+        data_freq[:, dx:s[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:s[1], 0:dy], axis=0))
+        data_freq[:, dx:s[1], dy:s[2]] = np.abs(np.fft.fft(data[:, dx:s[1], dy:s[2]], axis=0))
         data_freq = data_freq[0:np.floor(s[0]/2).astype('int')]
         f = np.linspace(0, fs/2, data_freq.shape[0])
         
@@ -165,10 +168,10 @@ def DFFOCT_RGB(data, method='fft', fs=2, f1=0.1, f2=0.5, f3=1):
     G = rescale_intensity(G, in_range=(v_min, v_max), out_range='uint8')
     
     R = np.mean(data_freq[18:np.min((80,data_freq.shape[0]-1)),:,:], axis=0)
-    v_min, v_max = np.percentile(B, (1, 99))
+    v_min, v_max = np.percentile(R, (1, 95))
     R = rescale_intensity(R, in_range=(v_min, v_max), out_range='uint8')
     
-    return np.dstack((R,G,B))
+    return np.dstack((R,G,B)).astype('uint8')
 
 def radial_profil(image, center=None):
     """
@@ -277,3 +280,16 @@ def build_colormap(Lx=50, Ly=1000, fs=2):
     plt.ylabel('Median frequency [Hz]')
     
     return colormap
+
+def overlay(u, v, alpha=0.5, plot=0):
+    im1 = np.zeros((max(u.shape[0],v.shape[0]),max(u.shape[1],v.shape[1]),3))
+    im2 = im1.copy()
+    for i in range(3):
+        im1[0:u.shape[0],0:u.shape[1],i] = u/np.max(u)
+    im1 = (im1/np.max(im1)*255).astype('uint8')
+    im2[0:v.shape[0],0:v.shape[1],0] = (v/np.max(v)*255)
+    im2 = im2.astype('uint8')
+    image_overlay = cv2.addWeighted(im1, 1-alpha, im2, alpha, 0)
+    if plot==1:
+        plt.imshow(image_overlay)
+    return image_overlay.astype('uint8')
