@@ -70,12 +70,12 @@ def fft(data, fs=2, n_piece=20):
     f = np.linspace(-fs/2, fs/2, data.shape[0])
     ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
     ind[-1] = data.shape[1]
-    data_freq = np.zeros((f.size, data.shape[1], data.shape[2])) + i*np.zeros((f.size, data.shape[1], data.shape[2]))
+    data_freq = np.zeros((f.size, data.shape[1], data.shape[2])) + 1j*np.zeros((f.size, data.shape[1], data.shape[2]))
     for i in range(n_piece-1):
         data_freq[:,ind[i]:ind[i+1],:] = np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0)
     return (f,data_freq)
 
-def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
+def DFFOCT_HSV(data, method='fft', fs=2, n_mean=4, n_std=10, n_piece=20):
     """
     Compute D-FF-OCT image in the HSV space with:
         - V: metabolic index (std with sliding window)
@@ -93,7 +93,7 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
         print('Unknown method')
         
     # Compute Intensity (V component) with substacks STD
-    n_substack = data.shape[0]-n_mean
+    n_substack = data.shape[0]-n_std
     a = np.zeros((n_substack,data.shape[1],data.shape[2]))
     for i in range(n_substack):
         a[i] = np.std(data[i:i+n_mean], axis=0)
@@ -120,7 +120,7 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
     S = rescale_intensity(S,out_range='float')
     return hsv2rgb(np.dstack((H,S,V)))
 
-def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece):
+def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece=20):
     """
     Compute D-FF-OCT image in the RGB space with:
         - R: high frequencies
