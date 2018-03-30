@@ -57,6 +57,24 @@ def process_4_phases_OCT(data):
         dataPhase[i,:,:]=np.angle((data[4*i+3]-data[4*i+1])/(data[4*i+4]-data[4*i+2]))
     return dataAmp,dataPhase
 
+def fft_welch(data, fs=2, n_piece=20):
+    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
+    ind[-1] = data.shape[1]
+    data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
+    for i in range(n_piece-1):
+        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0)
+    return (f,data_freq)
+
+def fft(data, fs=2, n_piece=20):
+    f = np.linspace(-fs/2, fs/2, data.shape[0])
+    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
+    ind[-1] = data.shape[1]
+    data_freq = np.zeros((f.size, data.shape[1], data.shape[2])) + i*np.zeros((f.size, data.shape[1], data.shape[2]))
+    for i in range(n_piece-1):
+        data_freq[:,ind[i]:ind[i+1],:] = np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0)
+    return (f,data_freq)
+
 def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
     """
     Compute D-FF-OCT image in the HSV space with:
@@ -65,31 +83,12 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
         - H: frequency bandwidth
     
     """
+    if n_mean>0:
+    	data = average(data, n=n_mean)
     if method=='welch':
-        # We divide the input in 4 pieces in order to avoid memory troubles
-        f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
-        dx = int(data.shape[1]/2)
-        dy = int(data.shape[2]/2)
-        data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
-        f, data_freq[:, 0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, 0:dx, dy:data.shape[2]] = welch(data[:, 0:dx, dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, dx:data.shape[1], 0:dy] = welch(data[:, dx:data.shape[1], 0:dy], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
-
+        f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
     elif method=='fft':
-        # We divide the input in 4 pieces in order to avoid memory troubles
-        dx = int(data.shape[1]/2)
-        dy = int(data.shape[2]/2)
-        s = data.shape
-        data_freq = np.zeros(s)
-        data = preprocessing.scale(np.reshape(data,(s[0],s[1]*s[2])), axis=0, with_std=False).reshape(s)
-        data_freq[:, 0:dx, 0:dy] = np.abs(np.fft.fft(data[:, 0:dx, 0:dy], axis=0))
-        data_freq[:, 0:dx, dy:data.shape[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:data.shape[2]], axis=0))
-        data_freq[:, dx:data.shape[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:data.shape[1], 0:dy], axis=0))
-        data_freq[:, dx:data.shape[1], dy:data.shape[2]] = np.abs(np.fft.fft(data[:, dx:data.shape[1], dy:data.shape[2]], axis=0))
-        data_freq = data_freq[0:np.floor(s[0]/2).astype('int')]
-        f = np.linspace(0, fs/2, data_freq.shape[0])
-        
+        f, data_freq = fft(data, fs=fs, n_piece=n_piece)
     else:
         print('Unknown method')
         
@@ -121,7 +120,7 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=10):
     S = rescale_intensity(S,out_range='float')
     return hsv2rgb(np.dstack((H,S,V)))
 
-def DFFOCT_RGB(data, method='fft', fs=2, nMean=4):
+def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece):
     """
     Compute D-FF-OCT image in the RGB space with:
         - R: high frequencies
@@ -130,32 +129,12 @@ def DFFOCT_RGB(data, method='fft', fs=2, nMean=4):
     Time dimension must be on axis 0.
     
     """
+    if n_mean>0:
+    	data = average(data, n=n_mean)
     if method=='welch':
-        # We divide the input in 4 pieces in order to avoid memory troubles
-        f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
-        dx = int(data.shape[1]/2)
-        dy = int(data.shape[2]/2)
-        data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
-        f, data_freq[:, 0:dx, 0:dy] = welch(data[:, 0:dx, 0:dy], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, 0:dx, dy:data.shape[2]] = welch(data[:, 0:dx, dy:data.shape[2]], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, dx:data.shape[1], 0:dy] = welch(data[:, dx:data.shape[1], 0:dy], fs=2, window='flattop', scaling='density', axis=0)
-        f, data_freq[:, dx:data.shape[1], dy:data.shape[2]] = welch(data[:, dx:data.shape[1], dy:data.shape[2]], fs=fs, window='flattop', scaling='density', axis=0)
-
+        f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
     elif method=='fft':
-        data = average(data, n=nMean)
-        # We divide the input in 4 pieces in order to avoid memory troubles
-        dx = int(data.shape[1]/2)
-        dy = int(data.shape[2]/2)
-        s = data.shape
-        data_freq = np.zeros(s)
-        data = preprocessing.scale(np.reshape(data,(s[0],s[1]*s[2])), axis=0, with_std=False).reshape(s)
-        data_freq[:, 0:dx, 0:dy] = np.abs(np.fft.fft(data[:, 0:dx, 0:dy], axis=0))
-        data_freq[:, 0:dx, dy:s[2]] = np.abs(np.fft.fft(data[:, 0:dx, dy:s[2]], axis=0))
-        data_freq[:, dx:s[1], 0:dy] = np.abs(np.fft.fft(data[:, dx:s[1], 0:dy], axis=0))
-        data_freq[:, dx:s[1], dy:s[2]] = np.abs(np.fft.fft(data[:, dx:s[1], dy:s[2]], axis=0))
-        data_freq = data_freq[0:np.floor(s[0]/2).astype('int')]
-        f = np.linspace(0, fs/2, data_freq.shape[0])
-        
+        f, data_freq = fft(data, fs=fs, n_piece=n_piece)
     else:
         print('Unknown method')
     
