@@ -10,6 +10,7 @@ from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
 from skimage.exposure import rescale_intensity
 from skimage.color import hsv2rgb
+from skimage.filters import gaussian
 from sklearn import preprocessing
 from PIL import Image
 from PIL import ImageFont
@@ -29,7 +30,7 @@ def normalize(data):
     return imNorm
 
 def average(data,n=10):
-    # Compute images average in a stack with n images
+    """ Compute images average in a stack with n images. """
     imAv=np.zeros((int(np.floor(data.shape[0]/n)),data.shape[1],data.shape[2]))
     for i in range(int(np.floor(data.shape[0]/n))):
         imAv[i,:,:]=np.mean(data[i*n:(i+1)*n,:,:],axis=0)
@@ -37,7 +38,7 @@ def average(data,n=10):
     return imAv
 
 def std(data,n=10):
-    # Compute images STD in a stack with n images
+    """ Compute images std in a stack with n images. """
     imSTD=np.zeros((data.shape[0]-n,data.shape[1],data.shape[2]))
     for i in range(data.shape[0]-n):
         imSTD[i,:,:]=np.std(data[i:i+n,:,:],axis=0)
@@ -72,10 +73,10 @@ def fft(data, fs=2, n_piece=20):
     ind[-1] = data.shape[1]
     data_freq = np.zeros((f.size, data.shape[1], data.shape[2])) + 1j*np.zeros((f.size, data.shape[1], data.shape[2]))
     for i in range(n_piece-1):
-        data_freq[:,ind[i]:ind[i+1],:] = np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0)
+        data_freq[:,ind[i]:ind[i+1],:] = np.abs(np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0))
     return (f,data_freq)
 
-def DFFOCT_HSV(data, method='fft', fs=2, n_mean=4, n_std=10, n_piece=20):
+def DFFOCT_HSV(data, method='fft', fs=2, n_std=50, n_piece=20):
     """
     Compute D-FF-OCT image in the HSV space with:
         - V: metabolic index (std with sliding window)
@@ -83,23 +84,17 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=4, n_std=10, n_piece=20):
         - H: frequency bandwidth
     
     """
-    if n_mean>0:
-    	data = average(data, n=n_mean)
-    if method=='welch':
-        f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
-    elif method=='fft':
-        f, data_freq = fft(data, fs=fs, n_piece=n_piece)
-    else:
-        print('Unknown method')
-        
+    
+    f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
+    
     # Compute Intensity (V component) with substacks STD
     n_substack = data.shape[0]-n_std
     a = np.zeros((n_substack,data.shape[1],data.shape[2]))
     for i in range(n_substack):
-        a[i] = np.std(data[i:i+n_mean], axis=0)
+        a[i] = np.std(data[i:i+n_std], axis=0)
     V = np.mean(a, axis=0)
     del(a)
-
+    
     # Compute Color (H component) with frequency median
     s = data_freq.shape
     data_freq = preprocessing.normalize(data_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
@@ -108,17 +103,19 @@ def DFFOCT_HSV(data, method='fft', fs=2, n_mean=4, n_std=10, n_piece=20):
     for i in range(cs.shape[1]):
         for j in range(cs.shape[2]):
             H[i,j] = np.min(np.where(cs[:,i,j]>=0.5))
-
+    
     # Compute Saturation (S component) with frequency bandwidth
     S = np.zeros((data.shape[1],data.shape[2]))
     for i in range(cs.shape[1]):
         for j in range(cs.shape[2]):
             S[i,j] = np.sqrt(np.sum(data_freq[:,i,j]*f**2)-np.mean(data_freq[:,i,j])**2)
-
-    V = rescale_intensity(V,out_range='float')
-    H = rescale_intensity(H,out_range='float')
-    S = rescale_intensity(S,out_range='float')
-    return hsv2rgb(np.dstack((H,S,V)))
+    
+    v_min, v_max = np.percentile(V, (0, 99.9))
+    Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
+    Hf = rescale_intensity(gaussian(H, sigma=3), out_range='float')
+    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
+    dffoct_hsv = hsv2rgb(np.dstack((Hf,Sf,Vf)))
+    return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
 
 def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece=20):
     """
@@ -130,7 +127,7 @@ def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece=20):
     
     """
     if n_mean>0:
-    	data = average(data, n=n_mean)
+        data = average(data, n=n_mean)
     if method=='welch':
         f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
     elif method=='fft':
