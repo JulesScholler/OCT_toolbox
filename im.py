@@ -76,7 +76,7 @@ def fft(data, fs=2, n_piece=20):
         data_freq[:,ind[i]:ind[i+1],:] = np.abs(np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0))
     return (f,data_freq)
 
-def DFFOCT_HSV(data, method='fft', fs=2, n_std=50, n_piece=20):
+def DFFOCT_HSV(data, fs=2, n_std=50, n_piece=20):
     """
     Compute D-FF-OCT image in the HSV space with:
         - V: metabolic index (std with sliding window)
