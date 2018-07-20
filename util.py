@@ -8,9 +8,11 @@ Created on Wed Mar  7 17:13:04 2018
 import os
 import h5py
 import numpy as np
+from OCT_toolbox import im
+from skimage.io import imsave
 
 def return_files(filename=None, directory='.\\', extension=None, method='keyword'):
-    ''' this function returns a list of file given some information (filenam, keyword or extension) or a combinaison
+    ''' this function returns a list of file given some information (filename, keyword or extension) or a combinaison
         of information. It will recursively look into the given folders and all subfolders. '''
     mylist = []
     if method == 'filename' and extension == None:
@@ -59,7 +61,7 @@ def move_files(directory_i, directory_f, filename, extension):
                 names.append(name)
     
     for i, pathname in enumerate(paths):
-        os.rename(pathname + '\\' + names[i], directory_f + names[i])
+        os.rename(pathname + '\\' + names[i], directory_f + '\\' + names[i])
 
 def rename_files(directory, filename, extension, index_shift):
     ''' This function renames files with digits with a fixed increment. '''
@@ -76,3 +78,40 @@ def rename_files(directory, filename, extension, index_shift):
         new_number = str(int(number) + index_shift)
         new_name = names[i].replace(number, new_number)
         os.rename(pathname + '\\' + names[i], pathname + '\\' + new_name)
+        
+def add_number(directory, filename, extension):
+    ''' This function adds digits. '''
+    paths = []
+    for path, subdirs, files in os.walk(directory):
+        for name in files:
+            if filename in name and name[-len(extension):] == extension:
+                paths.append(os.path.join(path, name))
+
+    for i, pathname in enumerate(paths):
+        os.rename(pathname, pathname[:-len(extension)-1] + str(i) + '.' + extension)
+        
+def sort_list(mylist):
+    mylistsorted = list(range(len(mylist)))
+    for i, pathname in enumerate(mylist):
+        number = [s for s in pathname.replace('_',' ').replace('.',' ').split() if s.isdigit()][-1]
+        mylistsorted[int(number)-1] = pathname
+    return mylistsorted
+
+def treat_timelapse_dffoct_fluo(pathname):
+    os.mkdir(pathname + '\\dffoct')
+    os.mkdir(pathname + '\\fluo')
+    add_number(pathname,'dffoct', 'tif')
+    add_number(pathname,'fluo', 'tif')
+    move_files(pathname, pathname + '\\dffoct', 'dffoct', 'tif')
+    move_files(pathname, pathname + '\\fluo', 'fluo', 'tif')
+    
+def mat2tif(pathname, filename):
+    matlist = return_files(filename, pathname, extension='mat', method='keyword')
+    for i,item in enumerate(matlist):
+        matfile = loadmatv7(item)
+        a = list(matfile.keys())
+        matfile = matfile[a[0]]
+        if matfile.ndim > 2:
+            im.save_as_tiff(matfile, item[0:-4])
+        else:
+            imsave(item[0:-3] + 'tif', matfile.transpose())

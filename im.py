@@ -59,12 +59,12 @@ def process_4_phases_OCT(data):
     return dataAmp,dataPhase
 
 def fft_welch(data, fs=2, n_piece=20):
-    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density')
+    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density', nperseg=511)
     ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
     ind[-1] = data.shape[1]
     data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
     for i in range(n_piece-1):
-        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0)
+        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0, nperseg=511)
     return (f,data_freq)
 
 def fft(data, fs=2, n_piece=20):
@@ -225,7 +225,7 @@ def save_as_tiff(data, filename):
     savefile=(data/np.max(data)*(2**16-1)).astype('uint16')
     with TiffWriter(filename+'.tif', imagej=True) as tif:
         for i in range(savefile.shape[0]):
-            tif.save(savefile[i], compress=0)
+            tif.save(np.squeeze(savefile[i]), compress=0, resolution=(0.222,0.222))
             
 def write_text(imPath, text, position=(0,0), color=(255,255,255), size=100):
     a = Image.open(imPath)
@@ -269,3 +269,45 @@ def overlay(u, v, alpha=0.5, plot=0):
     if plot==1:
         plt.imshow(image_overlay)
     return image_overlay.astype('uint8')
+
+def hist_match(source, template):
+    """
+    Adjust the pixel values of a grayscale image such that its histogram
+    matches that of a target image
+
+    Arguments:
+    -----------
+        source: np.ndarray
+            Image to transform; the histogram is computed over the flattened
+            array
+        template: np.ndarray
+            Template image; can have different dimensions to source
+    Returns:
+    -----------
+        matched: np.ndarray
+            The transformed output image
+    """
+
+    oldshape = source.shape
+    source = source.ravel()
+    template = template.ravel()
+
+    # get the set of unique pixel values and their corresponding indices and
+    # counts
+    s_values, bin_idx, s_counts = np.unique(source, return_inverse=True,
+                                            return_counts=True)
+    t_values, t_counts = np.unique(template, return_counts=True)
+
+    # take the cumsum of the counts and normalize by the number of pixels to
+    # get the empirical cumulative distribution functions for the source and
+    # template images (maps pixel value --> quantile)
+    s_quantiles = np.cumsum(s_counts).astype(np.float64)
+    s_quantiles /= s_quantiles[-1]
+    t_quantiles = np.cumsum(t_counts).astype(np.float64)
+    t_quantiles /= t_quantiles[-1]
+
+    # interpolate linearly to find the pixel values in the template image
+    # that correspond most closely to the quantiles in the source image
+    interp_t_values = np.interp(s_quantiles, t_quantiles, t_values)
+
+    return interp_t_values[bin_idx].reshape(oldshape)
