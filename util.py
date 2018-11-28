@@ -9,7 +9,7 @@ import os
 import h5py
 import numpy as np
 from OCT_toolbox import im
-from skimage.io import imsave
+from skimage.io import imsave, imread
 
 def return_files(filename=None, directory='.\\', extension=None, method='keyword'):
     ''' this function returns a list of file given some information (filename, keyword or extension) or a combinaison
@@ -154,3 +154,18 @@ def mat2tif(pathname, filename):
             im.save_as_tiff(matfile, item[0:-4])
         else:
             imsave(item[0:-3] + 'tif', matfile.transpose())
+            
+def raw2tif(pathname, filename, ftype, size):
+    os.mkdir(pathname + '\\tif')
+    rawlist = return_files(filename, pathname, extension='raw', method='keyword')
+    if ftype == 'color':
+        for i,item in enumerate(rawlist):
+            u = np.fromfile(item, dtype='int8', sep="")
+            u = u.reshape([size[0], size[1], 3])
+            imsave(item[0:-4] + '.tif', u)
+    else:
+        for i,item in enumerate(rawlist):
+            u = np.fromfile(item, dtype=ftype, sep="")
+            u = u.reshape(size)
+            imsave(item[0:-4] + '.tif', u)
+    move_files(pathname, pathname + '\\tif', 'plane', 'tif')
