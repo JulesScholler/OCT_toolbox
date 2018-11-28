@@ -42,6 +42,43 @@ def return_files(filename=None, directory='.\\', extension=None, method='keyword
                     mylist.append(os.path.join(path, name))
     return mylist
 
+def return_filenames(filename=None, directory='.\\', extension=None, method='keyword'):
+    ''' this function returns a list of file given some information (filename, keyword or extension) or a combinaison
+        of information. It will recursively look into the given folders and all subfolders. '''
+    mylist_path = []
+    mylist_name = []
+    if method == 'filename' and extension == None:
+        for path, subdirs, files in os.walk(directory):
+            for name in files:
+                if name == filename:
+                    mylist_path.append(path)
+                    mylist_name.append(name)
+    if method == 'filename' and extension != None:
+        for path, subdirs, files in os.walk(directory):
+            for name in files:
+                if name == filename + extension:
+                    mylist_path.append(path)
+                    mylist_name.append(name)
+    elif method == 'keyword' and extension != None:
+        for path, subdirs, files in os.walk(directory):
+            for name in files:
+                if filename in name and name[-len(extension):] == extension:
+                    mylist_path.append(path)
+                    mylist_name.append(name)
+    elif method == 'keyword' and extension == None:
+        for path, subdirs, files in os.walk(directory):
+            for name in files:
+                if filename in name:
+                    mylist_path.append(path)
+                    mylist_name.append(name)
+    elif method == 'extension':
+        for path, subdirs, files in os.walk(directory):
+            for name in files:
+                if name[-len(extension):] == extension:
+                    mylist_path.append(path)
+                    mylist_name.append(name)
+    return mylist_path, mylist_name
+
 def loadmatv7(pathname):
     ''' This function load .mat files recorded with the newest format (v7.3) as a numpy array. '''
     f = h5py.File(pathname)
@@ -112,6 +149,8 @@ def mat2tif(pathname, filename):
         a = list(matfile.keys())
         matfile = matfile[a[0]]
         if matfile.ndim > 2:
+            for k in range(matfile.shape[0]):
+                matfile[k] = matfile[k].transpose()
             im.save_as_tiff(matfile, item[0:-4])
         else:
             imsave(item[0:-3] + 'tif', matfile.transpose())

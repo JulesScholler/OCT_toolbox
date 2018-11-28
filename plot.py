@@ -59,8 +59,6 @@ def plot_time_series(imSTDtot,imNorm,n):
     axXcorr.set_xlabel('Delay [#]')
     axXcorr.set_ylabel('Normalized auto-correlation')
     
-#    plt.ion()
-    
     i = 0
     while 1:
         axDFFOCT.imshow(imSTDtot)
@@ -68,11 +66,13 @@ def plot_time_series(imSTDtot,imNorm,n):
         x=plt.ginput(1)
         x=np.array(x)
         x=x.astype(int)
+        dta = imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]])
         
         axDFFOCT.plot(x[0,0], x[0,1], '+r')
-        axTime.plot(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]))
-        f,p = welch(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]), nperseg=512)
-        axPSD.plot(f,p)
+        axTime.plot(dta)
+#        f,p = welch(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]), nperseg=512)
+        f = np.cumsum(dta)
+        axPSD.plot(f)
         u = np.correlate(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]),imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]), 'full')/np.dot(imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]),imNorm[:,x[0,1],x[0,0]]-np.mean(imNorm[:,x[0,1],x[0,0]]))
         axXcorr.plot(u[int(u.size/2):])
         plt.pause(0.05)

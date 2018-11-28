@@ -8,13 +8,17 @@ Created on Mon Oct  9 16:56:51 2017
 import numpy as np
 from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
-from skimage.exposure import rescale_intensity
+from skimage.exposure import rescale_intensity, equalize_hist
 from skimage.color import hsv2rgb
 from skimage.filters import gaussian
+from skimage.measure import label
+from skimage.morphology import dilation
+from skimage.util import invert
+
 from sklearn import preprocessing
 from PIL import Image
 from PIL import ImageFont
-from PIL import ImageDraw 
+from PIL import ImageDraw
 import matplotlib.pyplot as plt
 import cv2
 
@@ -56,6 +60,27 @@ def process_4_phases_OCT(data):
     for i in range(int(data.shape[0]/4)):
         dataAmp[i,:,:]=0.5*np.sqrt((data[4*i+4]-data[4*i+2])**2+(data[4*i+3]-data[4*i+1])**2)
         dataPhase[i,:,:]=np.angle((data[4*i+3]-data[4*i+1])/(data[4*i+4]-data[4*i+2]))
+    return dataAmp,dataPhase
+
+def process_5_phases_OCT(data):
+    dataAmp=np.zeros((int(data.shape[0]/5),data.shape[1],data.shape[2]))
+    dataPhase=np.zeros((int(data.shape[0]/5),data.shape[1],data.shape[2]))
+    for i in range(int(data.shape[0]/10)):
+        u = data[i*10:(i+1)*10]
+        I1 = u[0]
+        I2 = u[1]
+        I3 = u[2]
+        I4 = u[3]
+        I5 = u[4]
+        I6 = u[5]
+        I7 = u[6]
+        I8 = u[7]
+        I9 = u[8]
+        I10 = u[9]
+        dataAmp[2*i,:,:] = np.sqrt(4*(I2-I4)**2 + (I1-2*I3-I5)**2)
+        dataAmp[2*i+1,:,:] = np.sqrt(4*(I9-I7)**2 + (I10-2*I8-I6)**2)
+        dataPhase[2*i,:,:] = np.angle(np.sqrt(4*(I2-I4)**2-(I1-I5)**2) + 1j*(-I1+2*I3-I5))
+        dataPhase[2*i+1,:,:] = np.angle(np.sqrt(4*(I9-I7)**2-(I10-I6)**2) + 1j*(-I10+2*I8-I6))
     return dataAmp,dataPhase
 
 def fft_welch(data, fs=2, n_piece=20):
@@ -221,11 +246,11 @@ def online_std(data,M1,mean1,n):
     M2 = M1 + delta*delta2
     return mean2,M2
 
-def save_as_tiff(data, filename):
+def save_as_tiff(data, filename, resolution=(0.22,0.22)):
     savefile=(data/np.max(data)*(2**16-1)).astype('uint16')
     with TiffWriter(filename+'.tif', imagej=True) as tif:
         for i in range(savefile.shape[0]):
-            tif.save(np.squeeze(savefile[i]), compress=0, resolution=(0.222,0.222))
+            tif.save(np.squeeze(savefile[i]), compress=0, resolution=resolution)
             
 def write_text(imPath, text, position=(0,0), color=(255,255,255), size=100):
     a = Image.open(imPath)
@@ -311,3 +336,161 @@ def hist_match(source, template):
     interp_t_values = np.interp(s_quantiles, t_quantiles, t_values)
 
     return interp_t_values[bin_idx].reshape(oldshape)
+
+def label_from_contour(img, contour):
+    to_be_labeled = np.zeros(img.shape)
+    for i, el in enumerate(contour):
+        for ii in range(el.shape[0]):
+            to_be_labeled[int(el[ii,0]),int(el[ii,1])] = 1
+    return label(invert(dilation(to_be_labeled)), connectivity=1)
+
+def label_from_list(img, regions):
+    to_be_labeled = np.zeros(img.shape)
+    for i, el in enumerate(regions):
+        a = el['coords']
+        for ii in range(a.shape[0]):
+            to_be_labeled[int(a[ii,0]),int(a[ii,1])] = 1
+    return label(to_be_labeled)
+
+def butter2d_lp(shape, f, n, pxd=1):
+    """Designs an n-th order lowpass 2D Butterworth filter with cutoff
+   frequency f. pxd defines the number of pixels per unit of frequency (e.g.,
+   degrees of visual angle)."""
+    pxd = float(pxd)
+    rows, cols = shape
+    x = np.linspace(-0.5, 0.5, cols)  * cols / pxd
+    y = np.linspace(-0.5, 0.5, rows)  * rows / pxd
+    radius = np.sqrt((x**2)[np.newaxis] + (y**2)[:, np.newaxis])
+    filt = 1 / (1.0 + (radius / f)**(2*n))
+    return filt
+ 
+def butter2d_bp(shape, cutin, cutoff, n, pxd=1):
+    """Designs an n-th order bandpass 2D Butterworth filter with cutin and
+   cutoff frequencies. pxd defines the number of pixels per unit of frequency
+   (e.g., degrees of visual angle)."""
+    return butter2d_lp(shape,cutoff,n,pxd) - butter2d_lp(shape,cutin,n,pxd)
+ 
+def butter2d_hp(shape, f, n, pxd=1):
+    """Designs an n-th order highpass 2D Butterworth filter with cutin
+   frequency f. pxd defines the number of pixels per unit of frequency (e.g.,
+   degrees of visual angle)."""
+    return 1. - butter2d_lp(shape, f, n, pxd)
+ 
+def ideal2d_lp(shape, f, pxd=1):
+    """Designs an ideal filter with cutoff frequency f. pxd defines the number
+   of pixels per unit of frequency (e.g., degrees of visual angle)."""
+    pxd = float(pxd)
+    rows, cols = shape
+    x = np.linspace(-0.5, 0.5, cols)  * cols / pxd
+    y = np.linspace(-0.5, 0.5, rows)  * rows / pxd
+    radius = np.sqrt((x**2)[np.newaxis] + (y**2)[:, np.newaxis])
+    filt = np.ones(shape)
+    filt[radius>f] = 0
+    return filt
+ 
+def ideal2d_bp(shape, cutin, cutoff, pxd=1):
+    """Designs an ideal filter with cutin and cutoff frequencies. pxd defines
+   the number of pixels per unit of frequency (e.g., degrees of visual
+   angle)."""
+    return ideal2d_lp(shape,cutoff,pxd) - ideal2d_lp(shape,cutin,pxd)
+ 
+def ideal2d_hp(shape, f, n, pxd=1):
+    """Designs an ideal filter with cutin frequency f. pxd defines the number
+   of pixels per unit of frequency (e.g., degrees of visual angle)."""
+    return 1. - ideal2d_lp(shape, f, n, pxd)
+ 
+def bandpass(data, highpass, lowpass, n, pxd, eq='histogram'):
+    """Designs then applies a 2D bandpass filter to the data array. If n is
+   None, and ideal filter (with perfectly sharp transitions) is used
+   instead."""
+    fft = np.fft.fftshift(np.fft.fft2(data))
+    if n:
+        H = butter2d_bp(data.shape, highpass, lowpass, n, pxd)
+    else:
+        H = ideal2d_bp(data.shape, highpass, lowpass, pxd)
+    fft_new = fft * H
+    new_image = np.abs(np.fft.ifft2(np.fft.ifftshift(fft_new)))    
+    if eq == 'histogram':
+        new_image = equalize_hist(new_image)
+    return new_image
+
+def remove_black_stripes(frames):
+    for n,img in enumerate(frames):
+        img = np.min(img, axis=0)
+        bottom_left = []
+        top_left = []
+        bottom_right = []
+        top_right = []
+        
+        stop = 0
+        idx = 0
+        while stop == 0:
+            if np.mean(img[:,idx]) == 0:
+                idx += 1
+            else:
+                stop = 1
+                if np.min(np.where(img[:,idx]!=0)) > img.shape[0]/2:
+                    bottom_left.append(np.max(np.where(img[:,idx]!=0)))
+                    bottom_left.append(idx)
+                else:
+                    top_left.append(np.min(np.where(img[:,idx]!=0)))
+                    top_left.append(idx)
+                    
+        stop = 0
+        idx = 0
+        while stop == 0:
+            if np.mean(img[idx,:]) == 0:
+                idx += 1
+            else:
+                stop = 1
+                if np.min(np.where(img[idx,:]!=0)) < img.shape[1]/2:
+                    top_left.append(idx)
+                    top_left.append(np.min(np.where(img[idx,:]!=0)))
+                else:
+                    top_right.append(idx)
+                    top_right.append(np.max(np.where(img[idx,:]!=0)))
+                    
+        stop = 0
+        idx = img.shape[0]-1
+        while stop == 0:
+            if np.mean(img[idx,:]) == 0:
+                idx -= 1
+            else:
+                stop = 1
+                if np.min(np.where(img[idx,:]==0)) < img.shape[0]/2:
+                    bottom_left.append(idx)
+                    bottom_left.append(np.min(np.where(img[idx,:]!=0)))
+                else:
+                    bottom_right.append(idx)
+                    bottom_right.append(np.max(np.where(img[idx,:]!=0)))
+                    
+        stop = 0
+        idx = img.shape[1]-1
+        while stop == 0:
+            if np.mean(img[:,idx]) == 0:
+                idx -= 1
+            else:
+                stop = 1
+                if np.min(np.where(img[:,idx]!=0)) < img.shape[0]/2:
+                    top_right.append(np.min(np.where(img[:,idx]!=0)))
+                    top_right.append(idx)
+                else:
+                    bottom_right.append(np.max(np.where(img[:,idx]!=0)))
+                    bottom_right.append(idx)
+                    
+        x1 = np.max([bottom_left[1], top_left[1]])
+        y1 = np.max([top_left[0], top_right[0]])
+        x2 = np.min([bottom_right[1], top_right[1]])
+        y2 = np.min([bottom_left[0], bottom_right[0]])
+        
+        frames[n] = frames[n][:,y1:y2,x1:x2]
+        
+def plot_color(u,color,S = 0.8):
+    im_hsv = np.zeros((*u.shape,3))
+    im_hsv[:,:,2]=u-np.min(u);
+    im_hsv[:,:,2]=im_hsv[:,:,2]/np.max(im_hsv[:,:,2]);
+    im_hsv[:,:,1]=np.ones(u.shape) * S;
+    im_hsv[:,:,0]=color-np.min(color);
+    im_hsv[:,:,0]=im_hsv[:,:,0]/np.max(im_hsv[:,:,0])*0.66;
+    im_rgb=hsv2rgb(im_hsv);
+    return im_rgb
