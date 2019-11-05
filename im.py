@@ -93,6 +93,15 @@ def fft(data, fs=2, n_piece=20):
         data_freq[:,ind[i]:ind[i+1],:] = np.abs(np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0))
     return (f,data_freq)
 
+def fft_welch(data, fs=2, n_piece=20):
+    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density', nperseg=511)
+    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
+    ind[-1] = data.shape[1]
+    data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
+    for i in range(n_piece-1):
+        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0, nperseg=511)
+    return (f,data_freq)
+
 def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece=20):
     """
     Compute D-FF-OCT image in the RGB space with:
@@ -474,22 +483,12 @@ def compute_dffoct_cumsum(u, n_sample, n_step):
     v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
     return rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
 
-def fft_welch(data, fs=2, n_piece=20):
-    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density', nperseg=511)
-    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
-    ind[-1] = data.shape[1]
-    data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
-    for i in range(n_piece-1):
-        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0, nperseg=511)
-    return (f,data_freq)
-
 def compute_dffoct_cumsum_HSV(u, n_sample, n_step):
     """
     Compute D-FF-OCT image in the HSV space with:
         - V: metabolic index (cumsum with sliding window)
         - S: median frequency
         - H: frequency bandwidth
-    
     """
     n_piece = 10
     fs = 1
@@ -497,16 +496,10 @@ def compute_dffoct_cumsum_HSV(u, n_sample, n_step):
     s = u.shape
     
     # Compute V
-    v = np.zeros((int(np.floor(s[0]/n_step)), s[1], s[2]))
-    for i in range(int(np.floor(s[0]/n_step))):
-       v[i] = np.std(np.add.accumulate(u[i*n_step:i*n_step+n_sample]-np.mean(u[i*n_step:i*n_step+n_sample], axis=0), axis=0),axis=0)
-    v = np.mean(v, axis=0)
-    v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
-    V = rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
-    
-    f, u_freq = fft_welch(u, fs=fs, n_piece=n_piece)
+    V = compute_dffoct_cumsum(u, n_sample, n_step)
     
     # Compute Color (H component) with frequency median
+    f, u_freq = fft_welch(u, fs=fs, n_piece=n_piece)
     s = u_freq.shape
     u_freq = preprocessing.normalize(u_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
     H = np.tensordot(u_freq[1:-1],np.linspace(0,fs,u_freq[1:-1].shape[0]),axes=(0,0))
@@ -516,14 +509,15 @@ def compute_dffoct_cumsum_HSV(u, n_sample, n_step):
 #    for i in range(cs.shape[1]):
 #        for j in range(cs.shape[2]):
 #            S[i,j] = np.sqrt(np.sum(u_freq[:,i,j]*f**2)-np.mean(u_freq[:,i,j])**2)
-    S = np.ones((u.shape[1],u.shape[2]))*0.6
+    S = np.ones((u.shape[1],u.shape[2]))*0.7
     
-    v_min, v_max = np.percentile(V, (1, 99.9))
-    Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
-    v_min, v_max = np.percentile(H, (1, 95))
-    Hf = rescale_intensity(gaussian(H, sigma=2), in_range=(v_min, v_max), out_range='float')
+    v_min, v_max = np.percentile(H, (0.01, 99.9))
+    Hf = rescale_intensity(H, in_range=(v_min, v_max), out_range='float')
+    Hf = gaussian(Hf, sigma=3)
+    Hf = rescale_intensity(1-Hf, out_range='float')*0.66
+    
 #    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
-    dffoct_hsv = hsv2rgb(np.dstack((Hf,S,Vf)))
+    dffoct_hsv = hsv2rgb(np.dstack((Hf,S,V)))
     return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
 
 def compute_dffoct_HSV(u):
@@ -549,7 +543,7 @@ def compute_dffoct_HSV(u):
     
     f, u_freq = fft_welch(u, fs=fs, n_piece=n_piece)
     
-    # Compute Color (H component) with frequency median
+    # Compute Color (H component) with frequency mean
     s = u_freq.shape
     u_freq = preprocessing.normalize(u_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
     H = np.tensordot(u_freq[1:-1],np.linspace(0,fs,u_freq[1:-1].shape[0]),axes=(0,0))
@@ -559,12 +553,15 @@ def compute_dffoct_HSV(u):
 #    for i in range(cs.shape[1]):
 #        for j in range(cs.shape[2]):
 #            S[i,j] = np.sqrt(np.sum(u_freq[:,i,j]*f**2)-np.mean(u_freq[:,i,j])**2)
-    S = np.ones((u.shape[1],u.shape[2]))*0.6
+    S = np.ones((u.shape[1],u.shape[2]))*0.66
     
-    v_min, v_max = np.percentile(V, (0, 99.9))
+    v_min, v_max = np.percentile(V, (1, 99.9))
     Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
-    v_min, v_max = np.percentile(H, (1, 95))
-    Hf = rescale_intensity(gaussian(H, sigma=2), in_range=(v_min, v_max), out_range='float')
+    v_min, v_max = np.percentile(H, (1, 99))
+    Hf = rescale_intensity(H, in_range=(v_min, v_max), out_range='float')
+    Hf = gaussian(Hf, sigma=2)
+    Hf = rescale_intensity(-Hf, out_range='float')*0.6
+    
 #    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
     dffoct_hsv = hsv2rgb(np.dstack((Hf,S,Vf)))
     return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
