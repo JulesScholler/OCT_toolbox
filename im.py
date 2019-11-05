@@ -83,14 +83,6 @@ def process_5_phases_OCT(data):
         dataPhase[2*i+1,:,:] = np.angle(np.sqrt(4*(I9-I7)**2-(I10-I6)**2) + 1j*(-I10+2*I8-I6))
     return dataAmp,dataPhase
 
-def fft_welch(data, fs=2, n_piece=20):
-    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density', nperseg=511)
-    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
-    ind[-1] = data.shape[1]
-    data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
-    for i in range(n_piece-1):
-        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0, nperseg=511)
-    return (f,data_freq)
 
 def fft(data, fs=2, n_piece=20):
     f = np.linspace(-fs/2, fs/2, data.shape[0])
@@ -100,47 +92,6 @@ def fft(data, fs=2, n_piece=20):
     for i in range(n_piece-1):
         data_freq[:,ind[i]:ind[i+1],:] = np.abs(np.fft.fft(data[:,ind[i]:ind[i+1],:], axis=0))
     return (f,data_freq)
-
-def DFFOCT_HSV(data, fs=2, n_std=50, n_piece=20):
-    """
-    Compute D-FF-OCT image in the HSV space with:
-        - V: metabolic index (std with sliding window)
-        - S: median frequency
-        - H: frequency bandwidth
-    
-    """
-    
-    f, data_freq = fft_welch(data, fs=fs, n_piece=n_piece)
-    
-    # Compute Intensity (V component) with substacks STD
-    n_substack = data.shape[0]-n_std
-    a = np.zeros((n_substack,data.shape[1],data.shape[2]))
-    for i in range(n_substack):
-        a[i] = np.std(data[i:i+n_std], axis=0)
-    V = np.mean(a, axis=0)
-    del(a)
-    
-    # Compute Color (H component) with frequency median
-    s = data_freq.shape
-    data_freq = preprocessing.normalize(data_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
-    cs = np.cumsum(data_freq, axis=0)
-    H = np.zeros((data.shape[1],data.shape[2]))
-    for i in range(cs.shape[1]):
-        for j in range(cs.shape[2]):
-            H[i,j] = np.min(np.where(cs[:,i,j]>=0.5))
-    
-    # Compute Saturation (S component) with frequency bandwidth
-    S = np.zeros((data.shape[1],data.shape[2]))
-    for i in range(cs.shape[1]):
-        for j in range(cs.shape[2]):
-            S[i,j] = np.sqrt(np.sum(data_freq[:,i,j]*f**2)-np.mean(data_freq[:,i,j])**2)
-    
-    v_min, v_max = np.percentile(V, (0, 99.9))
-    Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
-    Hf = rescale_intensity(gaussian(H, sigma=3), out_range='float')
-    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
-    dffoct_hsv = hsv2rgb(np.dstack((Hf,Sf,Vf)))
-    return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
 
 def DFFOCT_RGB(data, method='fft', fs=2, n_mean=4, n_piece=20):
     """
@@ -494,3 +445,136 @@ def plot_color(u,color,S = 0.8):
     im_hsv[:,:,0]=im_hsv[:,:,0]/np.max(im_hsv[:,:,0])*0.66;
     im_rgb=hsv2rgb(im_hsv);
     return im_rgb
+
+def compute_dffoct(u):
+    """
+    Compute D-FF-OCT image in grayspace with:
+        - V: metabolic index (std with sliding window)
+    
+    """
+    s = u.shape
+    v = np.zeros((16, s[1], s[2]))
+    for i in range(16):
+       v[i] = np.std(u[i*32:(i+1)*32], axis=0)
+    v = np.mean(v, axis=0)
+    v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
+    return rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
+
+def compute_dffoct_cumsum(u, n_sample, n_step):
+    """
+    Compute D-FF-OCT image in grayspace with:
+        - V: metabolic index (cumsum with sliding window)
+    
+    """
+    s = u.shape
+    v = np.zeros((int(np.floor(s[0]/n_step)), s[1], s[2]))
+    for i in range(int(np.floor(s[0]/n_step))):
+       v[i] = np.std(np.add.accumulate(u[i*n_step:i*n_step+n_sample]-np.mean(u[i*n_step:i*n_step+n_sample], axis=0), axis=0),axis=0)
+    v = np.mean(v, axis=0)
+    v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
+    return rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
+
+def fft_welch(data, fs=2, n_piece=20):
+    f, a = welch(data[:,0,0], fs=2, window='flattop', scaling='density', nperseg=511)
+    ind = (np.linspace(0, data.shape[1], n_piece)).astype('int')
+    ind[-1] = data.shape[1]
+    data_freq = np.zeros((f.size, data.shape[1], data.shape[2]))
+    for i in range(n_piece-1):
+        f, data_freq[:,ind[i]:ind[i+1],:] = welch(data[:,ind[i]:ind[i+1],:], fs=fs, window='flattop', scaling='density', axis=0, nperseg=511)
+    return (f,data_freq)
+
+def compute_dffoct_cumsum_HSV(u, n_sample, n_step):
+    """
+    Compute D-FF-OCT image in the HSV space with:
+        - V: metabolic index (cumsum with sliding window)
+        - S: median frequency
+        - H: frequency bandwidth
+    
+    """
+    n_piece = 10
+    fs = 1
+
+    s = u.shape
+    
+    # Compute V
+    v = np.zeros((int(np.floor(s[0]/n_step)), s[1], s[2]))
+    for i in range(int(np.floor(s[0]/n_step))):
+       v[i] = np.std(np.add.accumulate(u[i*n_step:i*n_step+n_sample]-np.mean(u[i*n_step:i*n_step+n_sample], axis=0), axis=0),axis=0)
+    v = np.mean(v, axis=0)
+    v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
+    V = rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
+    
+    f, u_freq = fft_welch(u, fs=fs, n_piece=n_piece)
+    
+    # Compute Color (H component) with frequency median
+    s = u_freq.shape
+    u_freq = preprocessing.normalize(u_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
+    H = np.tensordot(u_freq[1:-1],np.linspace(0,fs,u_freq[1:-1].shape[0]),axes=(0,0))
+
+    # Compute Saturation (S component) with frequency bandwidth
+#    S = np.zeros((u.shape[1],u.shape[2]))
+#    for i in range(cs.shape[1]):
+#        for j in range(cs.shape[2]):
+#            S[i,j] = np.sqrt(np.sum(u_freq[:,i,j]*f**2)-np.mean(u_freq[:,i,j])**2)
+    S = np.ones((u.shape[1],u.shape[2]))*0.6
+    
+    v_min, v_max = np.percentile(V, (1, 99.9))
+    Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
+    v_min, v_max = np.percentile(H, (1, 95))
+    Hf = rescale_intensity(gaussian(H, sigma=2), in_range=(v_min, v_max), out_range='float')
+#    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
+    dffoct_hsv = hsv2rgb(np.dstack((Hf,S,Vf)))
+    return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
+
+def compute_dffoct_HSV(u):
+    """
+    Compute D-FF-OCT image in the HSV space with:
+        - V: metabolic index (std with sliding window)
+        - S: median frequency
+        - H: frequency bandwidth
+    
+    """
+    n_piece = 10
+    fs = 1
+
+    s = u.shape
+    
+    s = u.shape
+    v = np.zeros((16, s[1], s[2]))
+    for i in range(16):
+       v[i] = np.std(u[i*32:(i+1)*32], axis=0)
+    v = np.mean(v, axis=0)
+    v_min, v_max = np.percentile(v.flatten(),(0.01, 99.9))
+    V = rescale_intensity(v, in_range=(v_min, v_max), out_range='float64')
+    
+    f, u_freq = fft_welch(u, fs=fs, n_piece=n_piece)
+    
+    # Compute Color (H component) with frequency median
+    s = u_freq.shape
+    u_freq = preprocessing.normalize(u_freq.reshape((f.size,s[1]*s[2])), axis=0, norm='l1').reshape((f.size,s[1],s[2]))
+    H = np.tensordot(u_freq[1:-1],np.linspace(0,fs,u_freq[1:-1].shape[0]),axes=(0,0))
+
+    # Compute Saturation (S component) with frequency bandwidth
+#    S = np.zeros((u.shape[1],u.shape[2]))
+#    for i in range(cs.shape[1]):
+#        for j in range(cs.shape[2]):
+#            S[i,j] = np.sqrt(np.sum(u_freq[:,i,j]*f**2)-np.mean(u_freq[:,i,j])**2)
+    S = np.ones((u.shape[1],u.shape[2]))*0.6
+    
+    v_min, v_max = np.percentile(V, (0, 99.9))
+    Vf = rescale_intensity(V, in_range=(v_min, v_max), out_range='float')
+    v_min, v_max = np.percentile(H, (1, 95))
+    Hf = rescale_intensity(gaussian(H, sigma=2), in_range=(v_min, v_max), out_range='float')
+#    Sf = rescale_intensity(gaussian(1-S, sigma=2), out_range='float')
+    dffoct_hsv = hsv2rgb(np.dstack((Hf,S,Vf)))
+    return rescale_intensity(dffoct_hsv, out_range='uint8').astype('uint8')
+
+def ZCR(eigen_vect_t):
+    """
+    Compute zero crossing rate for temporal eigen vectors
+    
+    """
+    v = []
+    for i in range(eigen_vect_t.shape[0]):
+        v.append(((eigen_vect_t[i,:-1]* eigen_vect_t[i,1:]) < 0).sum())
+    return v
