@@ -9,10 +9,10 @@ import numpy as np
 from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
 from skimage.exposure import rescale_intensity, equalize_hist
-from skimage.color import hsv2rgb
+from skimage.color import hsv2rgb, label2rgb
 from skimage.filters import gaussian
-from skimage.measure import label
-from skimage.morphology import dilation
+from skimage.measure import label, regionprops
+from skimage.morphology import dilation, opening, remove_small_holes, remove_small_objects
 from skimage.util import invert
 from skimage.transform import rotate
 
@@ -454,7 +454,6 @@ def plot_color(u,color,S = 0.8):
     im_hsv[:,:,0]=color-np.min(color);
     im_hsv[:,:,0]=im_hsv[:,:,0]/np.max(im_hsv[:,:,0])*0.66;
     im_rgb=hsv2rgb(im_hsv);
-<<<<<<< HEAD
     return im_rgb
 
 def copy_4image(u):
@@ -481,10 +480,6 @@ def measure_astigmatism(u, n):
     for i,curve in enumerate(f):
         ff[i] = curve
     return np.std(ff, axis=0)
-||||||| merged common ancestors
-    return im_rgb
-=======
-    return im_rgb
 
 def compute_dffoct(u):
     """
@@ -606,4 +601,50 @@ def ZCR(eigen_vect_t):
     for i in range(eigen_vect_t.shape[0]):
         v.append(((eigen_vect_t[i,:-1]* eigen_vect_t[i,1:]) < 0).sum())
     return v
->>>>>>> 1450e10f7b7136bf54a92a929735a48d69083b93
+
+def preprocess_pmap(pmap):
+    """
+    Process probability map of cells to get boolean map.
+    
+    """
+    thresh = 0.8
+    pmap[pmap<thresh] = 0
+    pmap[pmap>0] = 1
+    t = opening(pmap, selem = np.ones((3,3)))
+    t = t.astype(bool)
+    t = remove_small_holes(t, 100)
+    t = remove_small_objects(t, 100)
+    return t
+                
+def get_cells_from_bool(t, dffoct, plot=False):
+    """
+    Get list of cells with properties from boolean map.
+    
+    """
+    label_image = label(t)
+    cells = []
+    for region in regionprops(label_image):
+        cells.append(region)
+            
+    if plot:
+        fig,ax = plt.subplots(1,2,sharex=True,sharey=True)
+        ax[0].imshow(dffoct)
+        ax[0].set_title('DFFOCT')
+        image_label_overlay = label2rgb(label_image, image=dffoct, alpha=0.2, bg_label=0)
+        ax[1].imshow(image_label_overlay)
+        ax[1].set_title('Detected cells ' + str(len(cells)))
+    return cells
+
+def get_raw_signals_from_cells(cells, dffoct_raw):
+    """
+    Get dynamic signals from direct acquisition for each cells given in the list.
+    
+    """
+    cells_dynamic = []
+    for cnt,cell in enumerate(cells):
+        coord = cell['coords']
+        dyn = np.zeros((coord.shape[0],dffoct_raw.shape[0]))
+        for ii in range(coord.shape[0]):
+            dyn[ii] = dffoct_raw[:,int(coord[ii,0]),int(coord[ii,1])]-np.mean(dffoct_raw[:,int(coord[ii,0]),int(coord[ii,1])])
+        cells_dynamic.append(dyn)
+    return cells_dynamic
