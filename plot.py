@@ -97,3 +97,14 @@ def overlay(u,v,alpha):
     im2=im2.astype('uint8')
     image_overlay=cv2.addWeighted(im1, 1-alpha, im2, alpha, 0)
     plt.imshow(image_overlay)
+    
+def plot_features_2d(features, scale):
+    '''
+    This function plots n features against each other, the number of plots is (n-1)*n/2
+    '''
+    n = features.shape[1]
+    fig, ax = plt.subplots(n-1,n-1)
+    for i in range(n):
+        for j in range(n):
+            if j>i:
+                ax[i,j-1].plot(features[0::scale,i],features[0::scale,j], 'k+')
