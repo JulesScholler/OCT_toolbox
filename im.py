@@ -14,6 +14,7 @@ from skimage.filters import gaussian
 from skimage.measure import label
 from skimage.morphology import dilation
 from skimage.util import invert
+from skimage.transform import rotate
 
 from sklearn import preprocessing
 from PIL import Image
@@ -494,3 +495,28 @@ def plot_color(u,color,S = 0.8):
     im_hsv[:,:,0]=im_hsv[:,:,0]/np.max(im_hsv[:,:,0])*0.66;
     im_rgb=hsv2rgb(im_hsv);
     return im_rgb
+
+def copy_4image(u):
+    s = np.array(u.shape)
+    v = np.zeros((s[0]*2,s[1]*2))
+    v[:s[0],:s[1]] = u
+    v[:s[0],s[1]:] = np.fliplr(u)
+    v[s[0]:,:s[1]] = np.flipud(u)
+    v[s[0]:,s[1]:] = np.fliplr(np.flipud(u))
+    return v
+    
+def measure_astigmatism(u, n):
+    u_fft = np.abs(np.fft.fftshift(np.fft.fft2(copy_4image(u))))
+    u_fft = gaussian(u_fft, sigma=3)
+    u_fft = np.log(u_fft)
+    s = u_fft.shape
+    f = []
+    for i in range(n):
+        v_fft = np.zeros(u_fft.shape)
+        u_fft_rotated = rotate(u_fft, angle=(i/n*360))
+        v_fft[0:int(s[0]/2),0:int(s[1]/2)] = u_fft_rotated[0:int(s[0]/2),0:int(s[1]/2)]
+        f.append(radial_profil(v_fft))
+    ff = np.zeros((len(f),len(f[0])))
+    for i,curve in enumerate(f):
+        ff[i] = curve
+    return np.std(ff, axis=0)
