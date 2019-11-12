@@ -169,3 +169,16 @@ def raw2tif(pathname, filename, ftype, size):
             u = u.reshape(size)
             imsave(item[0:-4] + '.tif', u)
     move_files(pathname, pathname + '\\tif', 'plane', 'tif')
+    
+def mat2npy(pathname, filename):
+    matlist = return_files(filename, pathname, extension='mat', method='keyword')
+    for i,item in enumerate(matlist):
+        matfile = loadmatv7(item)
+        a = list(matfile.keys())
+        matfile = matfile[a[0]]
+        if matfile.ndim > 2:
+            for k in range(matfile.shape[0]):
+                matfile[k] = matfile[k].transpose()
+            np.save(item[0:-3] + 'npy', matfile)
+        else:
+            imsave(matfile.transpose(), item[0:-3] + 'npy')
