@@ -176,6 +176,7 @@ def mat2npy(pathname, filename):
         matfile = loadmatv7(item)
         a = list(matfile.keys())
         matfile = matfile[a[0]]
+        matfile = im.normalize(matfile)
         if matfile.ndim > 2:
             for k in range(matfile.shape[0]):
                 matfile[k] = matfile[k].transpose()
