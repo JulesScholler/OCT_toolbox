@@ -175,7 +175,7 @@ def mat2npy(pathname, filename):
     for i,item in enumerate(matlist):
         matfile = loadmatv7(item)
         a = list(matfile.keys())
-        matfile = matfile[a[0]]
+        matfile = np.squeeze(matfile[a[0]])
         matfile = im.normalize(matfile)
         if matfile.ndim > 2:
             for k in range(matfile.shape[0]):

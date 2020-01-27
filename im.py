@@ -9,7 +9,7 @@ import numpy as np
 from scipy.signal import welch
 from skimage.external.tifffile import TiffWriter
 from skimage.exposure import rescale_intensity, equalize_hist
-from skimage.color import hsv2rgb, label2rgb
+from skimage.color import hsv2rgb, label2rgb, rgb2hsv
 from skimage.filters import gaussian
 from skimage.measure import label, regionprops
 from skimage.morphology import dilation, opening, remove_small_holes, remove_small_objects
@@ -648,3 +648,33 @@ def get_raw_signals_from_cells(cells, dffoct_raw):
             dyn[ii] = dffoct_raw[:,int(coord[ii,0]),int(coord[ii,1])]-np.mean(dffoct_raw[:,int(coord[ii,0]),int(coord[ii,1])])
         cells_dynamic.append(dyn)
     return cells_dynamic
+
+def stabilize_color(dffoct):
+    """
+    Stabilize color for timelapses and zStack of the shape [n_image, n_x, n_y, 3]
+    It uses the first image as template for the rest.
+    """
+    tmp = rgb2hsv(dffoct[0])
+    template = tmp[:,:,0]
+    for i in range(dffoct.shape[0]-1):
+        tmp = rgb2hsv(dffoct[i+1])
+        tmp[:,:,0] = hist_match(tmp[:,:,0], template)
+        tmp = hsv2rgb(tmp)
+        tmp = rescale_intensity(tmp, out_range='uint8').astype('uint8')
+        dffoct[i+1] = tmp
+    return dffoct
+
+def stabilize_running_color(dffoct,k):
+    """
+    Stabilize color for timelapses and zStack of the shape [n_image, n_x, n_y, 3].
+    It uses a sliding window of size k to take into account normal changes in color/frequency.
+    """
+    n,nx,ny,_ = dffoct.shape
+    for i in range(dffoct.shape[0]-k):
+        h_template = rgb2hsv(dffoct[i:i+k].reshape((k*nx, ny, 3)))[:,:,0]
+        tmp = rgb2hsv(dffoct[i])
+        tmp[:,:,0] = hist_match(tmp[:,:,0], h_template)
+        tmp = hsv2rgb(tmp)
+        tmp = rescale_intensity(tmp, out_range='uint8').astype('uint8')
+        dffoct[i] = tmp
+    return dffoct

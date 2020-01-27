@@ -7,6 +7,7 @@ Created on Mon Oct  9 17:30:10 2017
 
 import matplotlib.pyplot as plt
 from skimage import exposure
+from skimage.color import label2rgb
 import numpy as np
 import cv2
 from matplotlib.gridspec import GridSpec
@@ -108,3 +109,12 @@ def plot_features_2d(features, scale):
         for j in range(n):
             if j>i:
                 ax[i,j-1].plot(features[0::scale,i],features[0::scale,j], 'k+')
+                
+def plot_cells_from_list(cells, dffoct):
+    label_image = np.zeros(dffoct.shape)
+    for cnt, cell in enumerate(cells):
+        coord = cell['coords']
+        for ii in range(coord.shape[0]):
+            label_image[coord[ii,0],coord[ii,1]] = cnt
+    plt.figure()
+    plt.imshow(label2rgb(label_image, image=dffoct, alpha=0.2, bg_label=np.min(label_image[:])))
